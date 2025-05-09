@@ -49,7 +49,7 @@ function checkunique(page, data) {
     let unique = uniques[page];
     if ( unique ) {
         for ( let key of unique) {
-            check = check.sieve({key: data[key]});
+            check = check.filter( fields => fields[key] == data[key] );
         }
         return check.length == 0;
     }
