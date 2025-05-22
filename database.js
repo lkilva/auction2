@@ -1,6 +1,7 @@
 Array.prototype.sieve = function(object) {
+    let result = this;
     for ( let key in object ) {
-        result = this.filter(fields => fields[key] == object[key]);
+        result = result.filter(fields => fields[key] == object[key]);
     }
     return result;
 }
@@ -35,13 +36,11 @@ function save(page, data) {
 }
 
 function update(page, data, id) {
-    if (checkunique(page, data)) {
-        let index = database[page].findIndex( fields => fields.id == id );
-        database[page][index] = {id:id, ...data};
-        localStorage.auction = JSON.stringify(database);
-        return {result:'success', data: {id:id, ...data}};
-    }
-    return {result:'error'};
+    database = JSON.parse(localStorage.auction);
+    let index = database[page].findIndex( fields => fields.id == id );
+    database[page][index] = {id:id, ...data};
+    localStorage.auction = JSON.stringify(database);
+    return {result:'success', data: {id:id, ...data}};
 }
 
 function checkunique(page, data) {
@@ -57,11 +56,13 @@ function checkunique(page, data) {
 }
 
 function get(page, filter) {
+    database = JSON.parse(localStorage.auction);
     let result = database[page] || [];
     return result.sieve(filter);
 }
 
 function remove(page, id) {
+    database = JSON.parse(localStorage.auction);
     let index = database[page].findIndex( fields => fields.id == id);
     let removed = database[page].splice(index, 1);
     localStorage.auction = JSON.stringify(database);

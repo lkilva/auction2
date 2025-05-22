@@ -4,17 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>單機版電子競標模擬系統</title>
-    <link href="./style.css" rel="stylesheet">
+    <link href="./style.css" rel="stylesheet"> 
     <script src="./database.js"></script>
+    <script src="./method.js"></script>
+    <script src="./mechanism.js"></script>
+    <!--
     <script src="./common.js"></script>
     <script src="./main.js" defer></script>
+    -->
+    <script src="./straight.js" defer></script>
 </head>
 <body>
 
     <div class="title">
         <h1 id="title">首頁</h1>
-        <div id="subtitle"></div>
-        <div id="round_info"></div>
+        <h2 id="subtitle"></h2>
+        <div id="info_round"></div>
     </div>
 
     <div id="home" class="page active">
@@ -25,21 +30,22 @@
         <button value="viewBid" class="changePage">觀看標案</button>
     </div>
 
-    <div id="addBid" class="page active">
+    <div id="addBid" class="page">
         標案名稱：<input id="bid_name">
         <button id="add_bid">新增</button>
         <div id="info_add_bid"></div>
     </div>
 
-    <div id="gate" class="page active">
+    <div id="gate" class="page">
         選擇標案：<select id="select_bid"></select>
-        <span class="joinBid">
+        <span class="joinBid" hidden>
             選擇競標者：<select id="select_bidder"></select>
         </span>
-        <button>確定</button>
+        <button id="enterMain">確定</button>
+        <div id="info_gate"></div>
     </div>
 
-    <div id="setBid" class="page active">
+    <div id="setBid" class="page">
         <h2>標案相關設定</h2>
         <div>
             競標機制：<select id="config_mechanism">
@@ -48,39 +54,47 @@
                 <option value="CCA">CCA</option>
             </select><br>
             資格點數：<input type="checkbox" value="activity" id="config_activity">啟動
-            <span class="activity">
+            <span class="activity" hidden>
                 <input type="checkbox" value="preference" id="config_preference">加上顯示性偏好
-            </span><br>
+            </span>
+            加速機制(未實作)：<input type="checkbox" disabled>啟動<br>
+            喪失競標資格條件(未實作)：
+            <input type="checkbox" disabled>第一回合未有效報價
+            <input type="checkbox" disabled>累積4次無效報價
+            <input type="checkbox" disabled>自願放棄競標資格<br>
             報價金額 類型：<select id="quote_type">
                 <option value="clock">回合價</option>
             </select>
             單位：<input id="quote_unit" type="number" class="long">
             上升幅度：<input id="quote_raise" type="number">%<br>
             <button id="add_config">確認以上設定</button>
+            <div id="info_add_config"></div>
         </div><hr>
         <h2>標的相關設定</h2>
         <div>
-            標的：<input id="item_name">
+            名稱：<input id="item_name">
             數量：<input id="item_quantity" type="number">
             底價：<input id="item_reserve" type="number" class="long">
-            <span class="activity">
+            <span class="activity" hidden>
                 資格點數權重：<input id="item_weight" type="number">
             </span><br>
             <button id="add_item">新增標的</button>
+            <div id="info_add_item"></div>
             <!-- 標的清單：名稱、數量、底價 -->
             <table id="item_list"></table>
             <hr>
             <h3>頻寬上限</h3>
             標的：<select id="cap_item_item"></select>
-            權重：<input id="cap_item_weight">
+            權重：<input id="cap_item_weight" type="number">
             <button id="add_cap_item">加入標的</button><br>
             上限：<input id="cap_cap" type="number">
             <button id="add_cap">新增上限</button><br>
+            <div id="info_add_cap"></div>
             <table id="cap_list"></table>
             <hr>
             <h3>頻段描述</h3>
             標的：<select id="band_item_item"></select>
-            權重：<input id="band_item_weight">
+            權重：<input id="band_item_weight" type="number">
             <button id="add_band_item">加入標的</button><br>
             名稱：<input id="band_name">
             雙工類型：<select id="band_type">
@@ -89,24 +103,26 @@
             </select><br>
             開始頻率：<input id="band_start" type="number" class="middle">
             頻寬：<input id="band_width" type="number" class="middle">
-            <span class="band_type FDD">
+            <span class="band_type FDD" hidden>
                 雙工間隔：<input id="band_spacing" type="number" class="middle">
             </span>
             <button id="add_band">新增頻段</button>
+            <div id="info_add_band"></div>
             <table id="band_list"></table>
         </div><hr>
         <h2>競標者相關設定</h2>
         <div>
             名稱：<input id="bidder_name">
-            <span class="activity">
+            <span class="activity" hidden>
                 資格點數：<input id="bidder_point" type="number">
             </span>
             <button id="add_bidder">新增競標者</button>
+            <div id="info_add_bidder"></div>
             <table id="bidder_list"></table>
         </div>
     </div>
 
-    <div id="hostBid" class="page active">
+    <div id="hostBid" class="page">
         <h2>回合設定</h2>
         <div>
             <button id="start_now">手動開始回合</button>
@@ -117,27 +133,50 @@
             競標時間：<input type="number" id="round_bidtime">分鐘、
             休息時間：<input type="number" id="round_resttime">分鐘
             <button id="add_round">新增</button>
+            <div id="info_add_round"></div>
             <!-- 回合列表：回合數、開始時間、結束時間 -->
             <table id="round_list"></table>
         </div>
     </div>
 
-    <div id="joinBid" class="page active">
+    <div id="joinBid" class="page">
         <div id="state"></div>
-        <div class="offer">
+        <div class="offer quantity" hidden>
             <h2>投標</h2>
             標的：<select id="offer_item_item"></select>
             數量：<select id="offer_item_quantity"></select>
             金額：<select id="offer_item_price"></select>
             <button id="add_offer_item">確認</button>
             <table id="offer_item_list"></table>
-            <button id="add_offer">送出標單</button>
-            <hr>
-            <table id="offer_win_list"></table>
         </div>
+        <div class="offer complement" hidden>
+            <h2>投標</h2>
+            標的：<select id="package_item_item"></select>
+            數量：<select id="package_item_quantity"></select>
+            <button id="add_package_item">加入標的</button><br>
+            金額：<select id="offer_package_price"></select>
+            <button id="add_offer_package">加入標的組合</button>
+            <div id="info_add_offer_package"></div>
+            <table id="offer_package_list"></table>
+        </div>
+        <div class="offer location" hidden>
+            <h2>投標</h2>
+            位置：<select id="offer_location_location"></select>
+            金額：<input id="offer_location_price" type="number" class="long">
+            <button id="add_offer_location">加入位置</button>
+            <div id="info_add_offer_location"></div>
+            <table id="offer_location_list"></table>
+        </div>
+        <div class="offer quantity complement location" hidden>
+            <button id="add_offer">送出標單</button>
+            <div id="info_add_offer"></div>
+            <table id="offer_list"></table>
+        </div>
+        <hr>
+        <table id="offer_win_list"></table>
     </div>
 
-    <div id="viewBid" class="page active">
+    <div id="viewBid" class="page">
 
     </div>
 </body>
