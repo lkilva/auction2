@@ -596,6 +596,53 @@ function get_sums(bid_id) {
     return sums;
 }
 
+/** 競標者、標的、數量、金額、合計 */
+/** { sum:100,
+ *    bidders:[
+ *        {name:'Mr.a', price: 40, items:[{name:'a', quantity:4}, {name:'b', quantity:3}]},
+ *        {name:'Mr.b', price: 60, items:[{name:'a', quantity:3}, {name:'b', quantity:4}]}
+ *    ]
+ * 
+ *  }
+ */
+function table_package_win(bid_id) {
+    let offers = all_offers(bid_id);
+    let prices = all_prices(bid_id);
+    let sums = get_sums(bid_id);
+    let bidders = get('bidder', {bid_id: bid_id});
+    let items = get('item', {bid_id: bid_id})
+
+    let outputs = [];
+
+    for ( let i in sums ) {
+        let output = {};
+        output.sum = sums[i].price;
+        output.bidders = [];
+
+        let quotient = i;
+        let remainder = 0;
+        let pair = [];
+        for ( let j in offers ) {
+            remainder = quotient % offers[j].length;
+            quotient = Math.floor(quotient / offers[j].length);
+            pair.push(remainder);
+        }
+        for ( let j in offers ) {
+            if ( !offers.hasOwnProperty(j) ) continue;
+            let bidder = {name: bidders[j].name, price: prices[j][pair[j]], items: []}
+            output.bidders.push(bidder);
+            for ( let offer_item of offers[j][pair[j]] ) {
+                bidder.items.push({
+                    name: items.sieve({id: offer_item.item_id})[0].name,
+                    quantity: offer_item.quantity
+                });
+            }
+        }
+        outputs.push(output);
+    }
+    return outputs;
+}
+
 function max_price(sums) {
     let max = 0;
     for ( let i in sums ) {
