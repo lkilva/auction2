@@ -305,7 +305,7 @@ function offer_process(offer, weight, excess, point, base_price) {
 
 function gen_item_key(offer_items) {
     let items = get('item', {bid_id: select.bid_id});
-    return _gen_item_key(items, offer_items);
+    return _gen_item_key(offer_items, items);
 }
 
 /**
@@ -313,7 +313,7 @@ function gen_item_key(offer_items) {
  * @param offer_items - 物件陣件，具item_id、quantity屬性
  * @returns 字串 - offer_items裡各item的數量，以"-"相隔
  */
-function _gen_item_key(items, offer_items) {
+function _gen_item_key(offer_items, items) {
     let output = [];
     for ( let item of items ) {
         let offer = offer_items.sieve({item_id: item.id})[0];
@@ -321,75 +321,192 @@ function _gen_item_key(items, offer_items) {
     }
     return output.join("-");
 }
+test('_gen_item_key',
+    _gen_item_key([{item_id:1, quantity:4}, {item_id:2, quantity:3}],
+        [{id:3}, {id:1}, {id:4}, {id:2}]
+    ),
+    "0-4-0-3",
+    3
+)
 
 function compute_point(offer_items) {
-    let point = 0
     let items = get('item', {bid_id: bid_id});
-    for ( let offer_item of offer_items) {
+
+    return _compute_point(offer_items, items);
+}
+
+function _compute_point(offer_items, items) {
+    let point = 0;
+    for ( let offer_item of offer_items ) {
         point += offer_item.quantity * items.sieve({id: offer_item.item_id})[0].weight;
     }
     return point;
 }
+test('_compute_point',
+    _compute_point([{item_id:1, quantity:4}, {item_id:2, quantity:8}],
+        [{id:1, weight:2}, {id:2, weight:4}, {id:3, weight:2}]
+    ),
+    40,
+    3
+)
 
 function get_round_reduced() {
     let offers = get('offer', {bidder_id: select.bidder_id, stage: 'quantity', state: 'success'});
-    let points = [];
-    for ( let offer of offers ) {
-        let point = get('point', {offer_id: offer.id, reduce: true});
-        points = points.concat(point);
-    }
-    return points;
+    let points = get('point', {reduce: true});
+
+    return _get_round_reduced(points, offers);
 }
 
+function _get_round_reduced(points, offers) {
+    let outputs = []
+    for ( let offer of offers ) {
+        let output = points.sieve({offer_id: offer.id, reduce: true});
+        outputs = outputs.concat([...output]);
+    }
+    return outputs;
+}
+test('_get_round_reduced',
+    _get_round_reduced([{offer_id:1, point:4, reduce:true}, {offer_id:2, point:3, reduce:true},
+        {offer_id:3, point:3}
+    ], [{id:1}, {id:2}, {id:3}]
+    ),
+    [{offer_id:1, point:4, reduce:true}, {offer_id:2, point:3, reduce:true}],
+    3
+)
+
 /** 計算可報最高金額 */
-function offer_upper(bid_id, bidder_id, offers, offers_r, offer_items_r) {
-    let preference = config().preference;
-    let point = compute_point(offers)
-    let round_reduced = get_round_reduced();
+function offer_upper(bid_id, bidder_id, offer_items, offers_r, offer_items_r) {
+    let preference = get('config', {bid_id: bid_id})[0].preference;
+    let items = get('item', {bid_id: bid_id});
+    let offers = get('offer', {bidder_id: bidder_id, stage: 'quantity', state: 'success'});
+    let offer_wins = get('offer_win');
+    let points = get('point', {reduce: true});
+    let clocks = get('info', {bid_id: bid_id, stage: 'quantity', key: 'clock_price'});
+
+    let point = _compute_point(offer_items, items);
+    let round_reduced = _get_round_reduced(points, offers);
     let limit_min = Infinity;
-    for ( let round of round_reduced ) {
-        let clocks = get('info', {bid_id: bid_id, stage: 'quantity', key: 'clock_price'});
-        if ( point > round.point ) {
-            let offer_last = get('offer', {id: round.offer_id})[0];
-            let offers_last = get('offer_item', {offer_id: offer_last.id});
-            let clock_last = clocks.sieve({round: offer_last.round});
-            let limit = highest(bid_id, bidder_id, offers_last, offers_r, offer_items_r) -
-                product_sum(offers_last, clock_last) + product_sum(offers, clock_last);
+    for ( let reduced of round_reduced ) {
+        if ( point > reduced.point ) {
+            let round = get('offer', {id: reduced.offer_id})[0].round;
+            let limit = _limit(offer_items, round, offers, offer_wins, offers_r, offer_items_r, clocks, items);
             if ( !preference ) return limit;
             limit_min = limit_min < limit ? limit_min : limit;
         }
     }
-    let offer_last = get('offer', {bid_id: bid_id, bidder_id: bidder_id, stage: 'quantity'}).at(-1);
-    let offers_last = get('offer_item', {offer_id: offer_last.id});
-    let clock_last = get('info', {bid_id: bid_id, stage: 'quantity', round: offer_last.round,
-        key: 'clock_price'});
-    let limit = highest(bid_id, bidder_id, offers_last, offers_r, offer_items_r) -
-        product_sum(offers_last, clock_last) + product_sum(offers, clock_last);
+    let round = offers.at(-1).round;
+    let limit = _limit(offer_items, round, offers, offer_wins, offers_r, offer_items_r, clocks, items);
     limit_min = limit_min < limit ? limit_min : limit;
-    if ( gen_item_key(offers) == gen_item_key(offers_last) ) limit_min *= 1.2;
+    let key = _gen_item_key(offer_wins.sieve({offer_id: offers.at(-1).id}), items)
+    if ( _gen_item_key(offer_items, items) == key ) limit_min *= 1.2;
     return limit_min;
 }
 
-function highest(bid_id, bidder_id, offers, offers_r, offer_items_r) {
-    let output = 0;
-    let key = gen_item_key(offers);
-    let offers_o = get('offer', {bid_id: bid_id, bidder_id: bidder_id, stage:'quantity', state:'success'});
-    for ( let offer of offers_o ) {
-        let offer_items = get('offer_win', {offer_id: offer.id});
-        if ( gen_item_key(offer_items) == key ) {
-            let price = offer_items.reduce( (sum,item) => sum+item.price*item.quantity, 0);
-            output = output > price ? output : price;
-        }
+function _limit(offer_items, round, offers, offer_wins, offers_r, offer_items_r, clocks, items) {
+    let offer_o = offers.sieve({round: round})[0];
+    let offer_items_o = offer_wins.sieve({offer_id: offer_o.id});
+    let clock_o = clocks.sieve({round: round});
+    let highest_o = _highest(offer_items_o, offers, offer_wins, items);
+    let highest_r = _highest(offer_items_o, offers_r, offer_items_r, items);
+    console.log('highest - o:', highest_o, "; r:", highest_r);
+    let limit = Math.max(highest_o, highest_r) -
+        product_sum(offer_items_o, clock_o) + product_sum(offer_items, clock_o);
+    return limit;
+}
+
+function match_highest(match, offers, offer_items, items) {
+    let matched = [];
+    for ( let offer of offers ) {
+        let offer_item = offer_items.sieve({offer_id: offer.id});
+        if ( _gen_item_key(match, items) != _gen_item_key(offer_item, items) ) continue;
+        let price = get_offer_price(offer_item);
+        if ( matched.price && matched.price >= price) continue;
+        matched = {
+            ...offer,
+            price: price,
+            items:[...offer_item]
+        };
     }
+    return matched;
+}
+test('In machanism.js, match_highest',
+    match_highest(
+        [{item_id:1, quantity:3}, {item_id:2, quantity:8}],
+        [{id:1}, {id:2}, {id:3}],
+        [{offer_id:1, item_id:1, quantity:5, price:40}, {offer_id:1, item_id:3, quantity:8, price:50},
+         {offer_id:2, item_id:1, quantity:3, price:50}, {offer_id:2, item_id:2, quantity:8, price:40},
+         {offer_id:3, item_id:1, quantity:3, price:80}, {offer_id:3, item_id:2, quantity:8, price:70}],
+        [{id:1}, {id:2}, {id:3}]
+    ),
+    {id:3, price:800, items:[
+        {offer_id:3, item_id:1, quantity:3, price:80}, {offer_id:3, item_id:2, quantity:8, price:70}
+    ]},
+    3
+)
+
+function get_offer_price(offer_items) {
+    let price = 0
+    for ( offer_item of offer_items) {
+        price += offer_item.price * offer_item.quantity;
+    }
+    return price;
+}
+
+function highest(bid_id, bidder_id, offers, offers_r, offer_items_r) {
+    let items = get('item', {bid_id: bid_id});
+    let offers_o = get('offer', {bid_id: bid_id, bidder_id: bidder_id, stage:'quantity', state:'success'});
+    let offer_items_o = get('offer_win');
+
+    let output_o = _highest(offers, offers_o, offer_items_o, items);
+    let output_r = _highest(offers, offers_r, offer_items_r, items);
+
+    return Math.max(output_o, output_r);
+}
+
+function _highest(offers, offers_r, offer_items_r, items) {
+    let item_key = _gen_item_key(offers, items);
+    let output = 0;
     for ( let offer of offers_r ) {
-        let offer_items = offer_items_r.sieve({package_id: offer.id});
-        if ( gen_item_key(offer_items) == key ) {
-            let price = offer.price;
+        let offer_items = offer_items_r.filter( o => o.package_id == offer.id || o.offer_id == offer.id);
+        if ( _gen_item_key(offer_items, items) == item_key) {
+            let price = offer.price || offer_items.reduce( (sum, item) => sum+item.price*item.quantity, 0);
             output = output > price ? output : price;
         }
     }
     return output;
 }
+test("_highest_o",
+    _highest([{item_id:1, quantity:8}, {item_id:3, quantity:4}],
+        [{id:1}, {id:2}, {id:3}],
+        [{offer_id:1, item_id:1, quantity:8, price:50}, {offer_id:1, item_id:3, quantity:4, price:20},
+         {offer_id:1, item_id:4, quantity:5, price:10},
+         {offer_id:2, item_id:1, quantity:8, price:120}, {offer_id:2, item_id:3, quantity:4, price:60},
+         {offer_id:3, item_id:1, quantity:8, price:70}, {offer_id:3, item_id:3, quantity:4, price:50}],
+        [{id:1}, {id:4}, {id:3}]
+    ),
+    1200,
+    3
+)
+test("_highest_r",
+    _highest([{item_id:1, quantity:8}, {item_id:3, quantity:4}],
+        [{id:1, price:80}, {id:2, price: 60}],
+        [{package_id:1, item_id:1, quantity:8}, {package_id:1, item_id:3, quantity:4},
+         {package_id:1, item_id:4, quantity:5},
+         {package_id:2, item_id:1, quantity:8}, {package_id:2, item_id:3, quantity:4}],
+        [{id:1}, {id:4}, {id:3}]
+    ),
+    60,
+    3
+)
+test("_highest_0",
+    _highest([{item_id:1, quantity:8}, {item_id:3, quantity:4}],
+        [],
+        [],
+        [{id:1}, {id:4}, {id:3}]
+    ),
+    0,
+    3
+)
 
 /** 計算補充階段得標結果 */
 /** offers[bidder][package][item] */
@@ -399,7 +516,6 @@ function compute_package_win(bid_id) {
 
     let sums = get_sums(bid_id);
     let max = max_price(sums);
-    console.log(sums);
     for ( let i in max ) {
         let quotient = i;
         let remainder = 0;
@@ -506,3 +622,74 @@ function max_price_just(sums) {
     }
     return max_price(sum_just);
 }
+
+function update_package_item(package, package_items, item) {
+    let items = [...package_items];
+    let item_r = items.sieve({package_id: package.id, item_id: item.item_id})[0];
+    if ( !item_r ) {
+        item_r = {...item, package_id: package.id};
+        items.push(item_r);
+    }
+    item_r.quantity = item.quantity;
+    return items;
+}
+test("In mechanism.js - update_package_item - 1",
+    update_package_item({id:2, price:5},
+        [{package_id:1, item_id:1, quantity:4}, {package_id:1, item_id:2, quantity:8},
+         {package_id:2, item_id:5, quantity:8}, {package_id:2, item_id:2, quantity:4},
+         {package_id:3, item_id:3, quantity:4}, {package_id:3, item_id:1, quantity:5}
+        ],
+        {item_id:5, quantity:9}
+    ),
+    [{package_id:1, item_id:1, quantity:4}, {package_id:1, item_id:2, quantity:8},
+     {package_id:2, item_id:5, quantity:9}, {package_id:2, item_id:2, quantity:4},
+     {package_id:3, item_id:3, quantity:4}, {package_id:3, item_id:1, quantity:5}
+    ],
+    3
+);
+test("In mechanism.js - update_package_item - 2",
+    update_package_item({id:2, price:5},
+        [{package_id:1, item_id:1, quantity:4}, {package_id:1, item_id:2, quantity:8},
+         {package_id:2, item_id:5, quantity:8}, {package_id:2, item_id:2, quantity:4},
+         {package_id:3, item_id:3, quantity:4}, {package_id:3, item_id:1, quantity:5}
+        ],
+        {item_id:3, quantity:9}
+    ),
+    [{package_id:1, item_id:1, quantity:4}, {package_id:1, item_id:2, quantity:8},
+     {package_id:2, item_id:5, quantity:8}, {package_id:2, item_id:2, quantity:4},
+     {package_id:3, item_id:3, quantity:4}, {package_id:3, item_id:1, quantity:5},
+     {package_id:2, item_id:3, quantity:9},
+    ],
+    3
+);
+
+function update_package(packages, package_items_r, package, items) {
+    let packages_r = [...packages];
+    let package_items = [...package_items_r].sieve({package_id: package.id});
+    let key = _gen_item_key(package_items, items);
+    let select_package;
+    for ( let package_r of packages_r) {
+        let items_r = package_items_r.sieve({package_id: package_r.id});
+        if (_gen_item_key(items_r, items) != key) continue;
+        select_package = package_r;
+        break;
+    }
+    if (!select_package) {
+        select_package = {...package};
+        packages_r.push(select_package);
+    }
+    select_package.price = package.price;
+    return packages_r;
+}
+test("In mechanism.js - update_package",
+    update_package([{id:1, price:8}, {id:2, price:7}],
+        [{package_id:1, item_id:1, quantity:4}, {package_id:1, item_id:2, quantity:5},
+         {package_id:2, item_id:1, quantity:8}, {package_id:2, item_id:2, quantity:4},
+         {package_id:3, item_id:1, quantity:8}, {package_id:3, item_id:2, quantity:4}
+        ],
+        {id:3, price:9},
+        [{id:1}, {id:2}]
+    ),
+    [{id:1, price:8}, {id:2, price:9}],
+    3
+)

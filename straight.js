@@ -54,6 +54,8 @@ function gotoHome() {
         band_item = [];
         cap_item = [];
         offer_item = [];
+        package = [];
+        package_item = [];
         intervals.forEach( tick => {clearInterval(tick); intervals = []});
     })
     return button;
@@ -139,6 +141,7 @@ enterMain.addEventListener("click", function() {
         if ( select.stage == 'quantity' ) flush_offer_win_list(offer_win_list);
         if ( select.stage == 'complement' ) flush_package_win_list(offer_win_list);
         if ( check_in_round(select.bid_id, select.stage) ) {
+            default_complement_bid(select.bid_id, select.bidder_id);
             open_bid();
         } else {
             hide_offer();
@@ -181,7 +184,9 @@ function open_bid() {
         if ( select.stage == 'quantity' ) {
             flush_offer_item_list(offer_list, get('offer_item', {offer_id: offer.id}));
         }
-        if ( select.stage == 'complement' ) flush_offer_package_list2(offer_list);
+        if ( select.stage == 'complement' ) {
+            flush_offer_package_list2(offer_list);
+        }
     }
     show_offer(select.stage);
 }
@@ -1020,6 +1025,8 @@ package_item_quantity.addEventListener("input", function() {
     data.joinBid.package_item = data.joinBid.package_item || {};
     data.joinBid.package_item.quantity = parseInt(this.value);
 });
+
+let package_new = {id: generate_id(), random: generateRan()};
 let package_item = [];
 let info_add_offer_package = document.querySelector("#info_add_offer_package");
 let offer_package_list = document.querySelector("#offer_package_list");
@@ -1031,27 +1038,26 @@ add_package_item.addEventListener("click", function() {
         info_add_offer_package.textContent = "請不要留空。";
         return;
     }
-    let existed_item = package_item.sieve({item_id: item_id})[0];
-    if ( existed_item ) {
-        existed_item.quantity = data.joinBid.package_item.quantity;
-    } else {
-        package_item.push({...data.joinBid.package_item});
-    }
+    package_item = update_package_item(package_new, package_item, data.joinBid.package_item);
+
     package_item_item.value = "";
     package_item_quantity.value = "";
     data.joinBid.package_item = {};
     info_add_offer_package.textContent = "";
     flush_offer_package_list(offer_package_list);
-    let min = highest(select.bid_id, select.bidder_id, package_item, [], []);
+
+    let item = package_item.sieve({package_id: package_new.id});
+    let min = highest(select.bid_id, select.bidder_id, item, [], []);
     if ( min == 0 ) {
         let items = get('item', {bid_id: select.bid_id});
-        package_item.forEach(function(item) {
+        item.forEach(function(item) {
             let quantity = item.quantity;
             let reserve = items.sieve({id: item.item_id})[0].reserve;
             min += quantity * reserve;
         });
     }
-    let max = offer_upper(select.bid_id, select.bidder_id, package_item, package, package_item_r);
+    let max = offer_upper(select.bid_id, select.bidder_id, item, package, package_item);
+    console.log('min', min, 'max', max);
     let unit = config('quote').unit;
     let prices = [];
     while ( min <= max ) {
@@ -1066,10 +1072,10 @@ function flush_offer_package_list(table) {
         name: "報價清單",
         type: "package",
         data: package,
-        subdata: package_item_r,
+        subdata: package_item,
         row: {金額:"price"},
         subrow: {標的:"item_id", 數量:"quantity"}
-    }, select.bid_id, package_item)
+    }, select.bid_id, package_item.sieve({package_id: package_new.id}));
 }
 
 let package = [];
@@ -1081,27 +1087,22 @@ offer_package_price.addEventListener("input", function() {
 })
 let add_offer_package = document.querySelector("#add_offer_package");
 add_offer_package.addEventListener("click", function() {
-    if ( !check_cap(package_item) ) {
+    let items = get('item', {bid_id: select.bid_id});
+    let item = package_item.sieve({package_id: package_new.id})
+    if ( !check_cap(item) ) {
         alert("逾頻寬上限。");
         return;
     }
     let activity = config().activity;
-    if ( activity && !check_point(package_item) ) {
+    if ( activity && !check_point(item) ) {
         alert("不符合資格點數。");
         return;
     }
-    let id = generate_id();
-    package.push({
-        id: id,
-        price: data.joinBid.offer_package.price,
-        random: generateRan()
-    });
-    for ( let item of package_item ) {
-        item.package_id = id;
-        package_item_r.push(item);
-    }
-    package_item = [];
+    package_new.price = data.joinBid.offer_package.price;
+    package = update_package(package, package_item, package_new, items);
+    package_new = {id: generate_id(), random: generateRan()};
     data.joinBid.offer_package = {};
+    offer_package_price.value = "";
     flush_offer_package_list(offer_package_list);
 });
 
@@ -1123,9 +1124,9 @@ add_offer.addEventListener("click", function() {
     });
     for ( let p of package ) {
         save('package', {...p, offer_id: result.data.id});
-    }
-    for ( let p of package_item_r ) {
-        save('package_item', p);
+        for ( let pi of package_item.sieve({package_id: p.id})) {
+            save('package_item', pi);
+        }
     }
     flush_offer_package_list(offer_package_list);
     flush_offer_package_list2(offer_list);
@@ -1171,4 +1172,31 @@ function flush_package_win_list(table) {
             subrow: {標的:"item_id", 數量:"quantity"}
         }, select.bid_id)
     }
+}
+
+function default_complement_bid(bid_id, bidder_id) {
+    let items = get('item', {bid_id: bid_id});
+    let offers = get('offer', {bid_id: bid_id, bidder_id: bidder_id, stage:'quantity'});
+    let offer_wins = [];
+    for ( let offer of offers ) {
+        let win = get('offer_win', {offer_id: offer.id});
+        win = win.filter(o => o.offer_id == offer.id);
+        offer_wins = offer_wins.concat(win);
+    }
+    for ( let offer of offers ) {
+        let match = get('offer_win', {offer_id: offer.id});
+        let matched = match_highest(match, offers, offer_wins, items);
+        package_new.price = matched.price;
+        for ( let item_r of Object.values(matched.items) ) {
+            let item = {...item_r};
+            delete item.id;
+            delete item.offer_id;
+            delete item.price;
+            delete item.state;
+            package_item = update_package_item(package_new, package_item, item);
+        }
+        package = update_package(package, package_item, package_new, items);
+        package_new = {id: generate_id(), random: generateRan()};
+    }
+    flush_offer_package_list(offer_package_list);
 }
