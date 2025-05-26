@@ -446,7 +446,7 @@ test('In machanism.js, match_highest',
 
 function get_offer_price(offer_items) {
     let price = 0
-    for ( offer_item of offer_items) {
+    for ( let offer_item of offer_items) {
         price += offer_item.price * offer_item.quantity;
     }
     return price;
